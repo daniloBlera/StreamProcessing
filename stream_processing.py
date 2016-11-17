@@ -1,9 +1,9 @@
 # UTILIZA PYTHON3
 # -*- coding: utf-8 -*-
 # Execução:
-# spark-submit --jars <arquivo.jar> script.py
+# spark-submit --jars <arquivo.jar> --py-files <modulo.py> script.py
 #
-from pyspark import SparkContext
+from pyspark import SparkContext, SQLContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.mqtt import MQTTUtils
 
@@ -11,26 +11,48 @@ from event_structures import Post, Comment
 
 
 sc = SparkContext(appName="EventStreamReader")
-ssc = StreamingContext(sc, 10)
+sqlc = SQLContext(sc)
+ssc = StreamingContext(sc, 1)
+ssc.checkpoint("/tmp/spark-streaming-checkpoints")
 
 posts_list = []
-update_list = []
-sc.parallelize(posts_list)
-sc.parallelize(update_list)
+event_update_list = []
+
+inicio_simulado = '2010-01-25T05:12:32.921'
+
+
+def update_posts():
+    pass
 
 
 def store_posts(time, rdd):
+    global event_update_list
     events = rdd.collect()
 
     for element in events:
-        post = Post(element)
-        timestamp = post.timestamp
+        parameters = element.split('|')
+        timestamp = parameters[0][:23]
+        post_id = parameters[1]
+        score = 10
+        ttl = 10
 
-        posts_list.append(post)
-        print("\n--POST INSERTED INTO LIST--")
-        print("POSTS' NUMBER: %d" % len(posts_list))
-        update_list.append((timestamp, post, post))
-        print("ELEMENTS TO UPDATE: %d\n" % len(update_list))
+        event_update_list.append((timestamp, post_id, score, ttl))
+
+    print("ELEMENTS: {}".format(len(event_update_list)))
+
+
+# def store_posts(time, rdd):
+#     events = rdd.collect()
+#
+#     for element in events:
+#         post = Post(element)
+#         timestamp = post.timestamp
+#
+#         posts_list.append(post)
+#         print("\n--POST INSERTED INTO LIST--")
+#         print("POSTS' NUMBER: %d" % len(posts_list))
+#         update_list.append((timestamp, post))
+#         print("ELEMENTS TO UPDATE: %d\n" % len(update_list))
 
 
 def store_comments(time, rdd):
@@ -38,17 +60,20 @@ def store_comments(time, rdd):
 
     for element in events:
         comment = Comment(element)
+        timestamp = comment.timestamp
 
         post = get_commented_post_from(comment)
 
         if post is not None:
+            # TODO: suporte paralelismo?
             post.insert_comment(comment)
             print("--COMMENT INSERTED--")
-            update_list.append(comment)
+            print("POST SCORE: {}".format(post.total_score))
+            event_update_list.append((timestamp, comment))
         else:
             print("--COMMENT IGNORED--")
 
-        print("ELEMENTS TO UPDATE: %d\n" % len(update_list))
+        print("ELEMENTS TO UPDATE: %d\n" % len(event_update_list))
 
 
 def get_commented_post_from(comment):
@@ -59,31 +84,38 @@ def get_commented_post_from(comment):
     return None
 
 
-def pretty_print(time, rdd):
-    events = rdd.collect()
+def update_function(new_values, last_value):
+    event = last_value
 
-    for item in events:
-        print("ITEM: {}".format(str(item)))
+    if new_values:
+        event = new_values
+
+    return event
 
 
-# brokerUrl = 'tcp://172.16.206.18:1883'
-brokerUrl = 'tcp://192.168.25.7:1883'
+if __name__ == "__main__":
+    brokerUrl = 'tcp://localhost:1883'
 
-# mqttStream = MQTTUtils.createStream(ssc, brokerUrl, "#")
+    # mqttStream = MQTTUtils.createStream(ssc, brokerUrl, "#")
 
-friendships = MQTTUtils.createStream(ssc, brokerUrl, "friendships")
-comments = MQTTUtils.createStream(ssc, brokerUrl, "comments")
-likes = MQTTUtils.createStream(ssc, brokerUrl, "likes")
-posts = MQTTUtils.createStream(ssc, brokerUrl, "posts")
+    friendships = MQTTUtils.createStream(ssc, brokerUrl, "friendships")
+    comments = MQTTUtils.createStream(ssc, brokerUrl, "comments")
+    likes = MQTTUtils.createStream(ssc, brokerUrl, "likes")
+    posts = MQTTUtils.createStream(ssc, brokerUrl, "posts")
 
-# mqttStream.pprint()
+    # mqttStream.pprint()
+    # posts.foreachRDD(store_posts)
 
-# mqttStream.foreachRDD(pretty_print)
-# friendships.foreachRDD(pretty_print)
-# likes.foreachRDD(pretty_print)
-posts.foreachRDD(store_posts)
-comments.foreachRDD(store_comments)
+    posts_updated = posts.map(
+        lambda event: (event.split('|')[1], event.strip('\n'))
+    ).updateStateByKey(update_function)
+    
+    posts_updated.pprint()
+    # post_count = posts_updated.map(lambda tuple: (tuple, 1)).reduceByKey(lambda x, y: x + y)
+    # post_count.pprint()
+    
+    # comments.foreachRDD(store_comments)
 
-ssc.start()
-ssc.awaitTermination()
-ssc.stop()
+    ssc.start()
+    ssc.awaitTermination()
+    ssc.stop()

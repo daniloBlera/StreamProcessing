@@ -44,6 +44,16 @@ class Post:
             self.score -= 1
             self.decrement_total_score()
 
+    def is_active(self):
+        """
+        Verifica se o post se encontra ativo, um post é considerado ativo
+        enquanto tiver uma pontuação maior do que zero. Note que a pontuação
+        própria do post é independente da pontuação TOTAL da estrutura do post.
+
+        :return: True se estiver ativo, False caso contrário.
+        """
+        return self.score > 0
+
     def insert_comment(self, comment):
         """
         Insere o comentário a sua lista de comentários relacionados e atualiza
@@ -130,6 +140,15 @@ class Comment:
         :return: None
         """
         self.parent_post = post
+
+    def is_active(self):
+        """
+        Verifica se o comentário se encontra ativo, um comentário é considerado
+        ativo enquanto tiver uma pontuação maior do que zero.
+
+        :return: True se estiver ativo, False caso contrário.
+        """
+        return self.score > 0
 
 
 # TODO: Query 2
