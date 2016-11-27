@@ -26,7 +26,7 @@ def update_function(new_values, last_value):
 
     if new_values:
         event = new_values
-       
+
         if last_value:
             for element in last_value:
                 event.append(element)
@@ -47,7 +47,7 @@ def teste_print(rdd):
 
     for event in events:
         print(event)
-    
+
 
 if __name__ == "__main__":
     brokerUrl = 'tcp://localhost:1883'
@@ -80,13 +80,13 @@ if __name__ == "__main__":
     comment_reply_comment = comments.filter(
         lambda comment: comment.split('|')[6].strip('\n') == '').map(
         lambda event: (event.split('|')[5].strip('\n'), event.strip('\n'))
-    ).join(comment_post_table).map(
+        ).join(comment_post_table).map(
         lambda pair: (pair[1][1], pair[1][0])).updateStateByKey(update_function)
 
     # aux = comments.filter(
     #     lambda comment: comment.split('|')[6].strip('\n') == '').map(
     #     lambda event: (event.split('|')[5].strip('\n'), event.strip('\n'))
-    # ).join(comment_post_table).map(
+    #     ).join(comment_post_table).map(
     #     lambda pair: (pair[1][1], pair[1][0]))
 
     # comment_reply_comment = aux.updateStateByKey(update_function)
@@ -94,7 +94,8 @@ if __name__ == "__main__":
     comment_post_table = comments.filter(
         lambda comment: comment.split('|')[6].strip('\n') == '').map(
         lambda event: (event.split('|')[5].strip('\n'), event.strip('\n'))
-    ).join(comment_post_table).map(lambda pair: (pair[1][0].split('|')[1], pair[1][1])).union(
+        ).join(comment_post_table).map(
+        lambda pair: (pair[1][0].split('|')[1], pair[1][1])).union(
         comment_post_table).updateStateByKey(relational_table)
 
     # comment_post_table = aux.map(lambda pair: (pair[0], pair[1][1])).union(comment_post_table).updateStateByKey(relational_table)
@@ -110,4 +111,3 @@ if __name__ == "__main__":
     ssc.start()
     ssc.awaitTermination()
     ssc.stop()
-

@@ -29,12 +29,12 @@ def callback(ch, method, properties, body):
     print " [x] Received %r" % (body,)
 
 channel.basic_consume(callback,
-                      # queue='amq.topic',
-                      exchange=exchange_name,
-                      routing_key='#',
+                      queue='posts',
+                    #   queue='amq.topic',
+                    #   exchange=exchange_name,
+                    #   routing_key='#',
                       no_ack=True)
 
 print("--AQUI--")
 
 channel.start_consuming()
-
