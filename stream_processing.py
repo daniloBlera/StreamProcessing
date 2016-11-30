@@ -1,31 +1,32 @@
-# UTILIZA PYTHON3
 # -*- coding: utf-8 -*-
 # Execução:
-# spark-submit --jars <arquivo.jar> --py-files <modulo.py> script.py
+# spark-submit --jars <arquivo.jar> script.py
 #
 from pyspark import SparkContext, SQLContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.mqtt import MQTTUtils
 
-from event_structures import Post, Comment
-
 
 sc = SparkContext(appName="EventStreamReader")
 sqlc = SQLContext(sc)
-ssc = StreamingContext(sc, 1)
+ssc = StreamingContext(sc, 4)
 ssc.checkpoint("/tmp/spark-streaming-checkpoints")
+
+brokerUrl = 'tcp://localhost:1883'
+friendships = MQTTUtils.createStream(ssc, brokerUrl, "friendships")
+comments = MQTTUtils.createStream(ssc, brokerUrl, "comments")
+likes = MQTTUtils.createStream(ssc, brokerUrl, "likes")
+posts = MQTTUtils.createStream(ssc, brokerUrl, "posts")
+
 
 posts_list = []
 event_update_list = []
 
-inicio_simulado = '2010-01-25T05:12:32.921'
-
-
-def update_function(new_values, last_value):
+def update_function(new_value, last_value):
     event = last_value
 
-    if new_values:
-        event = new_values
+    if new_value:
+        event = new_value
 
         if last_value:
             for element in last_value:
@@ -33,80 +34,100 @@ def update_function(new_values, last_value):
 
     return event
 
-def relational_table(new_values, last_value):
+# TODO: pontuações
+def update_event(new_event, last_event):
+    if new_event:
+        return new_event
+
+    return last_event
+
+def update_relational_table(new_value, last_value):
     event = last_value
 
-    if new_values:
-        event = new_values[0]
+    if new_value:
+        event = new_value[0]
 
     return event
 
 
-def teste_print(rdd):
-    events = rdd.collect()
-
-    for event in events:
-        print(event)
-
-
 if __name__ == "__main__":
-    brokerUrl = 'tcp://localhost:1883'
-
-    friendships = MQTTUtils.createStream(ssc, brokerUrl, "friendships")
-    comments = MQTTUtils.createStream(ssc, brokerUrl, "comments")
-    likes = MQTTUtils.createStream(ssc, brokerUrl, "likes")
-    posts = MQTTUtils.createStream(ssc, brokerUrl, "posts")
+    print("Leitura de eventos iniciada...")
 
     # DStreams
     posts_updated = posts.map(
-            lambda event: (event.split('|')[1], event.strip('\n'))
-    ).updateStateByKey(update_function)
+        lambda event: (event.split('|')[1], event.strip('\n'))
+        ).updateStateByKey(update_event)
 
-    comments_reply_post = comments.map(
+    comments_updated = comments.map(
+        lambda evt: (evt.split('|')[1], tuple(evt.split('|')[5:7]))
+        ).updateStateByKey(update_event)
+
+    post_replies = comments.map(
         lambda event: (event.split('|')[6].strip('\n'), event.strip('\n'))
-    ).filter(lambda pair: pair[0] != '').updateStateByKey(update_function)
+        ).filter(lambda pair: pair[0] != '').updateStateByKey(update_event)
 
-    comment_post_table = comments.filter(
-        lambda comment: comment.split('|')[6].strip('\n') != ''
-    ).map(
-        lambda event: (event.split('|')[1].strip('\n'), event.split('|')[6].strip('\n'))
-    ).updateStateByKey(relational_table)
+    # comment_post_table = comments.map(
+    #     lambda event: (event.split('|')[1], event.split('|')[6].strip('\n'))
+    #     ).filter(lambda pair: pair[1] != ''
+    #     ).updateStateByKey(update_relational_table)
 
-    # comment_reply_comment = comments.filter(
-    #     lambda comment: comment.split('|')[6].strip('\n') == '').map(
-    #     lambda event: (event.split('|')[5].strip('\n'), event.strip('\n'))
-    # ).updateStateByKey(update_function)
+    # comment_replies = comments.map(
+    #     lambda event: (event.split('|')[5], event.strip('\n'))).filter(
+    #     lambda pair: pair[0] != '').updateStateByKey(update_function)
 
-    comment_reply_comment = comments.filter(
-        lambda comment: comment.split('|')[6].strip('\n') == '').map(
-        lambda event: (event.split('|')[5].strip('\n'), event.strip('\n'))
-        ).join(comment_post_table).map(
-        lambda pair: (pair[1][1], pair[1][0])).updateStateByKey(update_function)
+    # comment_replies = comments.map(
+    #     lambda evt: (evt.split('|')[5], evt.strip('\n')) ).filter(
+    #     lambda pair: pair[0] != '').join(
+    #     comment_post_table).map(
+    #     lambda pair: (pair[1][1], pair[1][0])).updateStateByKey(
+    #     update_function)
 
-    # aux = comments.filter(
+    cp_table = comments.map(
+    lambda evt: (evt.split('|')[1], evt.split('|')[6].strip('\n')) ).filter(
+    lambda pair: pair[1] != '').updateStateByKey(
+    update_relational_table)
+
+    cc_table = comments.map(
+        lambda evt: (evt.split('|')[5], evt.split('|')[1]) ).filter(
+        lambda pair: pair[0] != '')
+
+    ccp_table = cc_table.join(
+        cp_table).map(
+        lambda pair: (pair[1][0], pair[1][1]) ).updateStateByKey(
+        update_relational_table)
+
+    comment_replies = comments.map(
+        lambda evt: (evt.split('|')[5], evt.strip('\n'))).filter(
+        lambda pair: pair[0] != '').join(
+        cp_table).map(
+        lambda pair: (pair[1][0].split('|')[1], pair[1][1])).updateStateByKey(
+        update_function)
+
+    # comment_post_table = comments.filter(
     #     lambda comment: comment.split('|')[6].strip('\n') == '').map(
     #     lambda event: (event.split('|')[5].strip('\n'), event.strip('\n'))
     #     ).join(comment_post_table).map(
-    #     lambda pair: (pair[1][1], pair[1][0]))
+    #     lambda pair: (pair[1][0].split('|')[1], pair[1][1])).union(
+    #     comment_post_table).updateStateByKey(update_relational_table)
 
-    # comment_reply_comment = aux.updateStateByKey(update_function)
-
-    comment_post_table = comments.filter(
-        lambda comment: comment.split('|')[6].strip('\n') == '').map(
-        lambda event: (event.split('|')[5].strip('\n'), event.strip('\n'))
-        ).join(comment_post_table).map(
+    cp_table = comments.map(
+        lambda evt: (evt.split('|')[5], evt.strip('\n')) ).filter(
+        lambda pair: pair[0] != '').join(
+        cp_table).map(
         lambda pair: (pair[1][0].split('|')[1], pair[1][1])).union(
-        comment_post_table).updateStateByKey(relational_table)
+        cp_table).updateStateByKey(update_relational_table)
 
-    # comment_post_table = aux.map(lambda pair: (pair[0], pair[1][1])).union(comment_post_table).updateStateByKey(relational_table)
-    #posts_updated.pprint()
+    # unified_structure = posts_updated.union(post_replies).union(comment_replies)
 
-    unified_structure = posts_updated.union(comments_reply_post).union(comment_reply_comment)
-
-    unified_structure.pprint(50)
-    #comments_reply_post.pprint(50)
-    comment_post_table.pprint(50)
-    comment_reply_comment.pprint(50)
+    # Prints
+    # posts_updated.pprint(50)
+    # post_replies.pprint(50)
+    comments_updated.pprint(50)
+    cp_table.pprint(50)
+    ccp_table.pprint(50)
+    # comment_post_table.pprint(50)
+    # comment_replies.pprint(50)
+    # unified_structure.pprint(50)
 
     ssc.start()
     ssc.awaitTermination()

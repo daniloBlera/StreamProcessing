@@ -7,6 +7,8 @@ import pika
 
 sc = SparkContext("local[5]", "jesus_christ_that's_jason_bourne")
 
+partitions = 4
+
 posts = sc.emptyRDD()
 comments = sc.emptyRDD()
 events = sc.emptyRDD()
@@ -23,8 +25,8 @@ exchange_name = "amq.topic"
 queue_name = "SOCIAL_NETWORK_EVENTS"
 
 channel.exchange_declare(exchange=exchange_name, type='topic', durable=True)
-channel.queue_declare(queue=queue_name)
-channel.queue_bind(exchange=exchange_name, queue=queue_name, routing_key="#")
+# channel.queue_declare(queue=queue_name)
+# channel.queue_bind(exchange=exchange_name, queue=queue_name, routing_key="#")
 
 def consume_handler(ch, method, properties, body):
     """
@@ -79,9 +81,6 @@ def get_root_id_from(comment):
     """
     reply_id = comment.split('|')[5]
 
-    # parent_comment = comments.filter(
-    #     lambda pair: pair[1].split('|')[1] == reply_id)
-
     parent_comment = comments.filter(lambda pair: pair[1][1] == reply_id)
 
     if parent_comment.isEmpty():
@@ -108,9 +107,7 @@ def insert_comment(comment):
         if not root_id:
             return
 
-    # comments = comments.union(sc.parallelize([(root_id, comment)]))
-    comments = comments.union(sc.parallelize([(root_id, parameters)]))
-    # insert_event(comment, root_id)
+    comments = comments.union(sc.parallelize([(root_id, parameters)], partitions))
     update_scores(parameters[0][:23])
 
 def insert_post(post):
@@ -122,13 +119,8 @@ def insert_post(post):
     """
     global posts
     parameters = tuple(post.split('|'))
-    # post_id = post.split('|')[1]
-    # posts = posts.union(sc.parallelize([(post_id, post)]))
     post_id = parameters[1]
-    posts = posts.union(sc.parallelize([(post_id, parameters)]))
-    # print("\nPOSTS")
-    # posts.foreach(print_ln)
-    # insert_event(post, post_id)
+    posts = posts.union(sc.parallelize([(post_id, parameters)], partitions))
     update_scores(parameters[0][:23])
 
 def update_scores(event_timestamp):
@@ -149,6 +141,7 @@ def update_scores(event_timestamp):
         ).days < 10
     )
 
+    # TODO: Remover posts inativos
     scores = active_elements.mapValues(
         lambda pair: (
             10 - (current_sim_time - get_datetime_from(pair[0][:23])).days
@@ -168,6 +161,7 @@ def update_scores(event_timestamp):
         print("\n")
 
         # active_elements.map(lambda pair: (pair[1]))
+
 
     # print("\nACTIVE ELEMENTS - {}".format(current_sim_time))
     # active_elements.foreach(print_ln)
